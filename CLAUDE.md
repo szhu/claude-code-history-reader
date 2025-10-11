@@ -75,7 +75,7 @@ deno run --allow-read --allow-write --allow-env src/app/cli.ts <path-to-project>
 ## Key Features
 
 - Validates JSONL format using Zod schemas at ingestion time
-- Supports exporting all chats or specific chat IDs from a project (automatically sorted chronologically)
+- Supports exporting all chats or specific chat IDs from a project (automatically sorted chronologically by last message)
 - Configurable options for meta messages and output formatting
 - Handles both regular chat messages and summary entries
 - Graceful error handling for malformed JSONL lines
@@ -99,7 +99,7 @@ deno run --allow-read --allow-write --allow-env src/app/cli.ts <path-to-project>
 - Proper padding in collapsible summaries for Markdown formatting activation
 - Uses Remark with GFM plugin for table support and proper CommonMark output
 - Automatic handling of problematic cases like nested HTML, markdown special characters, and pipe characters
-- Multiple chats exported in chronological order (by first message timestamp) for better readability
+- Multiple chats exported in chronological order (by last message timestamp) for better readability
 
 ## CLI Usage Examples
 

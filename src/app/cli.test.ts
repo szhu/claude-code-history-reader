@@ -259,3 +259,124 @@ Deno.test("CLI handles invalid project path", async () => {
   assertEquals(code, 1);
   assertStringIncludes(errorOutput, "Project directory not found");
 });
+
+Deno.test("CLI sorts chats by last message timestamp", async () => {
+  const testSortDir = join(testDir, "sort-test");
+  await ensureDir(testSortDir);
+
+  try {
+    // Chat A: First message at 10:00, last message at 12:00
+    const chatAEntries = [
+      {
+        "parentUuid": null,
+        "isSidechain": false,
+        "userType": "external",
+        "cwd": "/test/project",
+        "sessionId": "session-a",
+        "version": "1.0.0",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Chat A first message",
+        },
+        "uuid": "chat-a-1",
+        "timestamp": "2025-01-01T10:00:00.000Z",
+      },
+      {
+        "parentUuid": "chat-a-1",
+        "isSidechain": false,
+        "userType": "external",
+        "cwd": "/test/project",
+        "sessionId": "session-a",
+        "version": "1.0.0",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Chat A last message",
+        },
+        "uuid": "chat-a-2",
+        "timestamp": "2025-01-01T12:00:00.000Z",
+      },
+    ];
+
+    // Chat B: First message at 11:00, last message at 11:30
+    const chatBEntries = [
+      {
+        "parentUuid": null,
+        "isSidechain": false,
+        "userType": "external",
+        "cwd": "/test/project",
+        "sessionId": "session-b",
+        "version": "1.0.0",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Chat B first message",
+        },
+        "uuid": "chat-b-1",
+        "timestamp": "2025-01-01T11:00:00.000Z",
+      },
+      {
+        "parentUuid": "chat-b-1",
+        "isSidechain": false,
+        "userType": "external",
+        "cwd": "/test/project",
+        "sessionId": "session-b",
+        "version": "1.0.0",
+        "type": "user",
+        "message": {
+          "role": "user",
+          "content": "Chat B last message",
+        },
+        "uuid": "chat-b-2",
+        "timestamp": "2025-01-01T11:30:00.000Z",
+      },
+    ];
+
+    await Deno.writeTextFile(
+      join(testSortDir, "chat-a.jsonl"),
+      chatAEntries.map((e) => JSON.stringify(e)).join("\n"),
+    );
+
+    await Deno.writeTextFile(
+      join(testSortDir, "chat-b.jsonl"),
+      chatBEntries.map((e) => JSON.stringify(e)).join("\n"),
+    );
+
+    const outputFile = join(testDir, "sort-output.md");
+    const command = new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--allow-read",
+        "--allow-write",
+        "src/app/cli.ts",
+        testSortDir,
+        "--output",
+        outputFile,
+      ],
+    });
+
+    const { code } = await command.output();
+    assertEquals(code, 0);
+
+    const content = await Deno.readTextFile(outputFile);
+
+    // Find positions of each chat in the output
+    const chatAPos = content.indexOf("## Chat: chat-a");
+    const chatBPos = content.indexOf("## Chat: chat-b");
+
+    // Chat B should appear BEFORE Chat A (sorted by last message time: 11:30 < 12:00)
+    // If sorted by first message time, Chat A would appear first (10:00 < 11:00) - this would be wrong
+    assertEquals(
+      chatBPos < chatAPos,
+      true,
+      `Chats should be sorted by last message time. Chat B (last: 11:30) should appear before Chat A (last: 12:00). Found positions: B=${chatBPos}, A=${chatAPos}`,
+    );
+
+    // Verify both chats are present
+    assertStringIncludes(content, "Chat A last message");
+    assertStringIncludes(content, "Chat B last message");
+  } finally {
+    await cleanupTestData();
+  }
+});

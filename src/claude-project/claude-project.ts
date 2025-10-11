@@ -114,9 +114,14 @@ export async function parseClaudeChatFile(
 }
 
 /**
- * Get the start time of a Claude chat file by reading the first entry
+ * Get a timestamp from a Claude chat file by reading the first or last entry
+ * @param chatFile - Path to the chat file
+ * @param position - 'start' to get the first timestamp, 'end' to get the last timestamp
  */
-export async function getChatStartTime(chatFile: string): Promise<Date> {
+export async function getChatTime(
+  chatFile: string,
+  position: "start" | "end" = "start",
+): Promise<Date> {
   try {
     const content = await Deno.readTextFile(chatFile);
     const lines = content.trim().split("\n").filter((line) => line.trim());
@@ -125,10 +130,15 @@ export async function getChatStartTime(chatFile: string): Promise<Date> {
       return new Date(0); // Fallback for empty files
     }
 
-    // Try to parse the first line to get the earliest timestamp
-    for (const line of lines) {
+    // Determine iteration order based on position
+    const lineIndices = position === "end"
+      ? Array.from({ length: lines.length }, (_, i) => lines.length - 1 - i)
+      : Array.from({ length: lines.length }, (_, i) => i);
+
+    // Try to parse lines to get the timestamp
+    for (const i of lineIndices) {
       try {
-        const json = JSON.parse(line);
+        const json = JSON.parse(lines[i]);
         const entry = ChatEntrySchema.parse(json);
         if ("timestamp" in entry) {
           return new Date(entry.timestamp);
@@ -146,7 +156,7 @@ export async function getChatStartTime(chatFile: string): Promise<Date> {
 }
 
 /**
- * Sort Claude chat files by chronological order (earliest start time first)
+ * Sort Claude chat files by chronological order (earliest end time first)
  */
 export async function sortChatFilesByTime(
   chatFiles: string[],
@@ -154,12 +164,12 @@ export async function sortChatFilesByTime(
   const chatFilesWithTimes = await Promise.all(
     chatFiles.map(async (chatFile) => ({
       file: chatFile,
-      startTime: await getChatStartTime(chatFile),
+      endTime: await getChatTime(chatFile, "end"),
     })),
   );
 
   return chatFilesWithTimes
-    .sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
+    .sort((a, b) => a.endTime.getTime() - b.endTime.getTime())
     .map((item) => item.file);
 }
 

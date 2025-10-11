@@ -41,7 +41,7 @@ Simple, focused architecture with clear separation of concerns:
 - **Smart Collapsible Formatting**: Assistant messages automatically collapse after 3 paragraphs, headings always go inside `<details>` blocks
 - **Comprehensive Tool Use Display**: Tool parameters, results, and intelligent summaries for common Claude Code tools
 - **Metadata Tables**: Session info, token usage, timing, and export settings for each chat and project
-- **Chronological Organization**: Multiple chats sorted by timestamp for better readability
+- **Chronological Organization**: Multiple chats sorted by last message timestamp for better readability
 - **Robust Markdown Generation**: Uses Remark ecosystem for proper CommonMark compliance and automatic escaping
 - **Configurable Options**: Export specific chats, include/exclude meta messages, custom output files
 - **Current Project Detection**: Automatically finds and exports the current working directory's Claude project
