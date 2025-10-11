@@ -22,6 +22,9 @@ bin/claude-history-export --current-project
 # Export specific project to file
 bin/claude-history-export ~/.claude/projects/my-project --output export.md
 
+# Export with deduplicated timeline (for forked chats)
+bin/claude-history-export ~/.claude/projects/my-project --multiple-chats=merge
+
 # Show help
 bin/claude-history-export --help
 ```
@@ -41,6 +44,7 @@ Simple, focused architecture with clear separation of concerns:
 - **Smart Collapsible Formatting**: Assistant messages automatically collapse after 3 paragraphs, headings always go inside `<details>` blocks
 - **Comprehensive Tool Use Display**: Tool parameters, results, and intelligent summaries for common Claude Code tools
 - **Metadata Tables**: Session info, token usage, timing, and export settings for each chat and project
+- **Two Export Modes**: Separate mode (default) for independent chats, or merge mode to deduplicate forked chats into single chronological timeline
 - **Chronological Organization**: Multiple chats sorted by last message timestamp for better readability
 - **Robust Markdown Generation**: Uses Remark ecosystem for proper CommonMark compliance and automatic escaping
 - **Configurable Options**: Export specific chats, include/exclude meta messages, custom output files

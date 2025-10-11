@@ -13,6 +13,7 @@ import {
 import {
   extractChatMetadata,
   findChatFiles,
+  getChatTime,
   parseClaudeChatFile,
   sortChatFilesByTime,
 } from "../claude-project/claude-project.ts";
@@ -25,9 +26,187 @@ import {
 import { formatTimestamp } from "./claude-formatting.ts";
 
 /**
- * Build the complete markdown document from chat files
+ * Build markdown document with merged chats (deduplicated timeline)
  */
-async function buildMarkdownDocument(
+async function buildMergedMarkdownDocument(
+  title: string,
+  chatFiles: string[],
+  options: AppCliOptions,
+): Promise<string> {
+  const documentNodes: RootContent[] = [];
+
+  // Main title
+  documentNodes.push(u("heading", { depth: 1 as const }, [u("text", title)]));
+
+  // Export metadata table
+  if (chatFiles.length > 1) {
+    const exportMetadata = createExportMetadata(
+      basename(chatFiles[0]).split("/").slice(-2, -1)[0] || "Chat",
+      chatFiles,
+      options,
+    );
+    const exportMetadataNodes = createMetadataTableNodes(exportMetadata);
+    documentNodes.push(...exportMetadataNodes);
+    documentNodes.push(u("thematicBreak"));
+  }
+
+  // Sort chats by first message time, then by last message time
+  const chatFilesWithTimes = await Promise.all(
+    chatFiles.map(async (chatFile) => ({
+      file: chatFile,
+      startTime: await getChatTime(chatFile, "start"),
+      endTime: await getChatTime(chatFile, "end"),
+    })),
+  );
+  const sortedChatFiles = chatFilesWithTimes
+    .sort((a, b) => {
+      const startDiff = a.startTime.getTime() - b.startTime.getTime();
+      if (startDiff !== 0) return startDiff;
+      return a.endTime.getTime() - b.endTime.getTime();
+    })
+    .map((item) => item.file);
+
+  // Show metadata tables for each chat
+  for (const chatFile of sortedChatFiles) {
+    const chatId = basename(chatFile, ".jsonl");
+    console.error(`Loading chat metadata: ${chatId}`);
+
+    try {
+      const entries = await parseClaudeChatFile(chatFile);
+      const metadata = extractChatMetadata(entries);
+
+      // Format timestamps
+      const formattedMetadata = { ...metadata };
+      if (formattedMetadata["Start Time"]) {
+        formattedMetadata["Start Time"] = formatTimestamp(
+          formattedMetadata["Start Time"],
+        );
+      }
+      if (formattedMetadata["End Time"]) {
+        formattedMetadata["End Time"] = formatTimestamp(
+          formattedMetadata["End Time"],
+        );
+      }
+
+      // Add chat heading and metadata
+      documentNodes.push(
+        u("heading", { depth: 2 as const }, [u("text", `Chat: ${chatId}`)]),
+      );
+      const metadataNodes = createMetadataTableNodes(formattedMetadata);
+      documentNodes.push(...metadataNodes);
+    } catch (error) {
+      console.error(`Error loading metadata for ${chatFile}:`, error);
+    }
+  }
+
+  documentNodes.push(u("thematicBreak"));
+
+  // Load all entries and deduplicate by UUID
+  const entriesByUuid = new Map();
+  const entryTimestamps = new Map();
+
+  for (const chatFile of chatFiles) {
+    const chatId = basename(chatFile, ".jsonl");
+    console.error(`Processing chat entries: ${chatId}`);
+
+    try {
+      const entries = await parseClaudeChatFile(chatFile);
+      console.error(`  Found ${entries.length} entries`);
+
+      for (const entry of entries) {
+        // Skip summary entries in merge mode
+        if ("type" in entry && entry.type === "summary") {
+          continue;
+        }
+
+        // Extract UUID and timestamp
+        const uuid = "uuid" in entry ? entry.uuid : null;
+        const timestamp = "timestamp" in entry ? entry.timestamp : null;
+
+        if (uuid && !entriesByUuid.has(uuid)) {
+          entriesByUuid.set(uuid, { entry, chatId });
+          if (timestamp) {
+            entryTimestamps.set(uuid, new Date(timestamp));
+          }
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : String(error);
+      console.error(`Error processing ${chatFile}:`, errorMessage);
+    }
+  }
+
+  // Sort entries by timestamp
+  const sortedUuids = Array.from(entriesByUuid.keys()).sort((a, b) => {
+    const timeA = entryTimestamps.get(a) || new Date(0);
+    const timeB = entryTimestamps.get(b) || new Date(0);
+    return timeA.getTime() - timeB.getTime();
+  });
+
+  console.error(
+    `Merged ${sortedUuids.length} unique entries from ${chatFiles.length} chats`,
+  );
+
+  // Add conversation heading
+  documentNodes.push(
+    u("heading", { depth: 2 as const }, [u("text", "Conversation Timeline")]),
+  );
+
+  // Process entries with tool result merging per chat
+  const chatEntries = new Map();
+  for (const [, { entry, chatId }] of entriesByUuid) {
+    if (!chatEntries.has(chatId)) {
+      chatEntries.set(chatId, []);
+    }
+    chatEntries.get(chatId).push(entry);
+  }
+
+  // Merge tool results within each chat's entries
+  const mergedChatEntries = new Map();
+  for (const [chatId, entries] of chatEntries) {
+    mergedChatEntries.set(chatId, mergeToolResults(entries));
+  }
+
+  // Rebuild the merged entries map with tool results
+  const mergedEntriesByUuid = new Map();
+  for (const entries of mergedChatEntries.values()) {
+    for (const entry of entries) {
+      const uuid = "uuid" in entry ? entry.uuid : null;
+      if (uuid) {
+        mergedEntriesByUuid.set(uuid, entry);
+      }
+    }
+  }
+
+  // Output entries in chronological order with chat markers
+  let lastChatId = null;
+  for (const uuid of sortedUuids) {
+    const { chatId } = entriesByUuid.get(uuid);
+    const entry = mergedEntriesByUuid.get(uuid);
+
+    if (!entry) continue;
+
+    // Add HTML comment when switching to a different chat
+    if (lastChatId !== chatId) {
+      documentNodes.push(
+        u("html", `<!-- From chat: ${chatId} -->`),
+      );
+      lastChatId = chatId;
+    }
+
+    const entryNodes = createChatEntryNodes(entry, options);
+    documentNodes.push(...entryNodes);
+  }
+
+  return stringifyMarkdown(documentNodes);
+}
+
+/**
+ * Build the complete markdown document from chat files (separate mode)
+ */
+async function buildSeparateMarkdownDocument(
   title: string,
   chatFiles: string[],
   options: AppCliOptions,
@@ -110,6 +289,21 @@ async function buildMarkdownDocument(
 
   // Build and return markdown
   return stringifyMarkdown(documentNodes);
+}
+
+/**
+ * Build the complete markdown document from chat files
+ */
+async function buildMarkdownDocument(
+  title: string,
+  chatFiles: string[],
+  options: AppCliOptions,
+): Promise<string> {
+  if (options.multipleChats === "merge") {
+    return buildMergedMarkdownDocument(title, chatFiles, options);
+  } else {
+    return buildSeparateMarkdownDocument(title, chatFiles, options);
+  }
 }
 
 /**

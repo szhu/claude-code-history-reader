@@ -28,6 +28,7 @@ export interface AppCliOptions {
   chats?: string[];
   help?: boolean;
   currentProject?: boolean;
+  multipleChats?: "separate" | "merge";
 }
 
 /**

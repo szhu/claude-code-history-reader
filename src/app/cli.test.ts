@@ -380,3 +380,174 @@ Deno.test("CLI sorts chats by last message timestamp", async () => {
     await cleanupTestData();
   }
 });
+
+Deno.test("CLI merge mode deduplicates forked chats", async () => {
+  const testMergeDir = join(testDir, "merge-test");
+  await ensureDir(testMergeDir);
+
+  try {
+    // Create shared entries (appear in both chats)
+    const sharedEntry1 = {
+      "parentUuid": null,
+      "isSidechain": false,
+      "userType": "external",
+      "cwd": "/test/project",
+      "sessionId": "shared-session",
+      "version": "1.0.0",
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "Shared message 1",
+      },
+      "uuid": "shared-uuid-1",
+      "timestamp": "2025-01-01T10:00:00.000Z",
+    };
+
+    const sharedEntry2 = {
+      "parentUuid": "shared-uuid-1",
+      "isSidechain": false,
+      "userType": "external",
+      "cwd": "/test/project",
+      "sessionId": "shared-session",
+      "version": "1.0.0",
+      "type": "assistant",
+      "message": {
+        "id": "msg_shared",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-3",
+        "content": [{ "type": "text", "text": "Shared response" }],
+        "stop_reason": null,
+        "stop_sequence": null,
+        "usage": { "input_tokens": 5, "output_tokens": 5, "service_tier": "standard" },
+      },
+      "uuid": "shared-uuid-2",
+      "timestamp": "2025-01-01T10:01:00.000Z",
+    };
+
+    // Unique entry for parent chat
+    const parentEntry = {
+      "parentUuid": "shared-uuid-2",
+      "isSidechain": false,
+      "userType": "external",
+      "cwd": "/test/project",
+      "sessionId": "parent-session",
+      "version": "1.0.0",
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "Parent-only message",
+      },
+      "uuid": "parent-uuid-1",
+      "timestamp": "2025-01-01T10:02:00.000Z",
+    };
+
+    // Unique entry for forked chat
+    const forkedEntry = {
+      "parentUuid": "shared-uuid-2",
+      "isSidechain": false,
+      "userType": "external",
+      "cwd": "/test/project",
+      "sessionId": "forked-session",
+      "version": "1.0.0",
+      "type": "user",
+      "message": {
+        "role": "user",
+        "content": "Forked-only message",
+      },
+      "uuid": "forked-uuid-1",
+      "timestamp": "2025-01-01T10:03:00.000Z",
+    };
+
+    // Summary entry (should be excluded in merge mode)
+    const summaryEntry = {
+      "type": "summary",
+      "summary": "Test summary",
+      "leafUuid": "forked-uuid-1",
+    };
+
+    // Parent chat: shared entries + parent-only entry + summary
+    const parentChat = [sharedEntry1, sharedEntry2, parentEntry, summaryEntry];
+
+    // Forked chat: shared entries + forked-only entry
+    const forkedChat = [sharedEntry1, sharedEntry2, forkedEntry];
+
+    await Deno.writeTextFile(
+      join(testMergeDir, "parent.jsonl"),
+      parentChat.map((e) => JSON.stringify(e)).join("\n"),
+    );
+
+    await Deno.writeTextFile(
+      join(testMergeDir, "forked.jsonl"),
+      forkedChat.map((e) => JSON.stringify(e)).join("\n"),
+    );
+
+    // Test separate mode (should have duplicates)
+    const separateOutputFile = join(testDir, "separate-output.md");
+    const separateCommand = new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--allow-read",
+        "--allow-write",
+        "src/app/cli.ts",
+        testMergeDir,
+        "--output",
+        separateOutputFile,
+      ],
+    });
+
+    const { code: separateCode } = await separateCommand.output();
+    assertEquals(separateCode, 0);
+
+    const separateContent = await Deno.readTextFile(separateOutputFile);
+
+    // Test merge mode (should deduplicate)
+    const mergeOutputFile = join(testDir, "merge-output.md");
+    const mergeCommand = new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--allow-read",
+        "--allow-write",
+        "src/app/cli.ts",
+        testMergeDir,
+        "--output",
+        mergeOutputFile,
+        "--multiple-chats=merge",
+      ],
+    });
+
+    const { code: mergeCode } = await mergeCommand.output();
+    assertEquals(mergeCode, 0);
+
+    const mergeContent = await Deno.readTextFile(mergeOutputFile);
+
+    // Verify merge mode has deduplication
+    assertStringIncludes(mergeContent, "## Conversation Timeline");
+    assertStringIncludes(mergeContent, "Shared message 1");
+    assertStringIncludes(mergeContent, "Shared response");
+    assertStringIncludes(mergeContent, "Parent-only message");
+    assertStringIncludes(mergeContent, "Forked-only message");
+
+    // Verify HTML comments for chat boundaries
+    assertStringIncludes(mergeContent, "<!-- From chat:");
+
+    // Verify summary is NOT included in merge mode
+    assertEquals(mergeContent.includes("Test summary"), false);
+
+    // Shared message should appear twice in separate mode, once in merge mode
+    const sharedMessageCount = (separateContent.match(/Shared message 1/g) || []).length;
+    const mergeMessageCount = (mergeContent.match(/Shared message 1/g) || []).length;
+
+    assertEquals(sharedMessageCount, 2, "Separate mode should have duplicate shared messages");
+    assertEquals(mergeMessageCount, 1, "Merge mode should deduplicate shared messages");
+
+    // Merge output should be shorter than separate output
+    assertEquals(
+      mergeContent.length < separateContent.length,
+      true,
+      "Merge mode output should be shorter than separate mode",
+    );
+  } finally {
+    await cleanupTestData();
+  }
+});

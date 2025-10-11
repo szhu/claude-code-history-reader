@@ -7,6 +7,7 @@ import { basename } from "https://deno.land/std@0.208.0/path/mod.ts";
 import { type BaseCliOptions, parseCliArgs, showHelp } from "../cli-args.ts";
 import { detectCurrentProject } from "../claude-project/claude-project.ts";
 import { exportChat, exportProject } from "./export.ts";
+import type { AppCliOptions } from "./chat-processing.ts";
 
 /**
  * Application-specific CLI options
@@ -15,6 +16,7 @@ export interface CliOptions extends BaseCliOptions {
   input?: string; // Path to project folder or chat JSONL file
   output?: string;
   "current-project"?: boolean; // Use current directory's Claude project
+  "multiple-chats"?: "separate" | "merge"; // How to handle multiple chats
   _?: (string | number)[]; // Positional arguments
 }
 
@@ -23,7 +25,7 @@ export interface CliOptions extends BaseCliOptions {
  */
 export function parseAppArgs(args: string[] = Deno.args): CliOptions {
   const parsed = parseCliArgs<CliOptions>(args, {
-    string: ["output"],
+    string: ["output", "multiple-chats"],
     boolean: ["current-project"],
     alias: {
       o: "output",
@@ -33,6 +35,17 @@ export function parseAppArgs(args: string[] = Deno.args): CliOptions {
   // Take first positional argument as input
   if (parsed._ && parsed._.length > 0) {
     parsed.input = String(parsed._[0]);
+  }
+
+  // Validate multiple-chats option
+  if (
+    parsed["multiple-chats"] &&
+    parsed["multiple-chats"] !== "separate" &&
+    parsed["multiple-chats"] !== "merge"
+  ) {
+    throw new Error(
+      `Invalid value for --multiple-chats: "${parsed["multiple-chats"]}". Must be "separate" or "merge".`,
+    );
   }
 
   return parsed;
@@ -59,6 +72,11 @@ export function showAppHelp() {
         flag: "--output <path>",
         description: "Output markdown file path (default: stdout)",
       },
+      {
+        flag: "--multiple-chats <mode>",
+        description:
+          'How to handle multiple chats: "separate" or "merge" (default: separate)',
+      },
       { flag: "--help", description: "Show this help message" },
     ],
     [
@@ -80,8 +98,24 @@ export function showAppHelp() {
         command:
           "claude-history-export ~/.claude/projects/my-project --output export.md",
       },
+      {
+        description: "Export with merged chats (deduplicated timeline)",
+        command:
+          "claude-history-export ~/.claude/projects/my-project --multiple-chats=merge",
+      },
     ],
   );
+}
+
+/**
+ * Convert CLI options to app options format
+ */
+function convertCliOptions(cliOptions: CliOptions): AppCliOptions {
+  return {
+    output: cliOptions.output,
+    currentProject: cliOptions["current-project"],
+    multipleChats: cliOptions["multiple-chats"],
+  };
 }
 
 /**
@@ -129,6 +163,7 @@ export async function main(args: string[] = Deno.args): Promise<void> {
   }
 
   const { type, path } = await resolveInputPath(options);
+  const appOptions = convertCliOptions(options);
 
   if (type === "chat") {
     // Export single chat file
@@ -140,7 +175,7 @@ export async function main(args: string[] = Deno.args): Promise<void> {
       console.error(`Output: stdout`);
     }
 
-    await exportChat(path, options);
+    await exportChat(path, appOptions);
   } else {
     // Export entire project
     const projectName = basename(path);
@@ -151,7 +186,7 @@ export async function main(args: string[] = Deno.args): Promise<void> {
       console.error(`Output: stdout`);
     }
 
-    await exportProject(path, options);
+    await exportProject(path, appOptions);
   }
 }
 

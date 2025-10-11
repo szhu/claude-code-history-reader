@@ -76,6 +76,9 @@ deno run --allow-read --allow-write --allow-env src/app/cli.ts <path-to-project>
 
 - Validates JSONL format using Zod schemas at ingestion time
 - Supports exporting all chats or specific chat IDs from a project (automatically sorted chronologically by last message)
+- **Two export modes for handling multiple chats:**
+  - **Separate mode** (default): Each chat exported as its own section with full content
+  - **Merge mode**: Deduplicates shared history from forked chats, creates single chronological timeline sorted by first message time (then last message time)
 - Configurable options for meta messages and output formatting
 - Handles both regular chat messages and summary entries
 - Graceful error handling for malformed JSONL lines
@@ -104,11 +107,14 @@ deno run --allow-read --allow-write --allow-env src/app/cli.ts <path-to-project>
 ## CLI Usage Examples
 
 ```bash
-# Export all chats from a project
+# Export all chats from a project (separate mode, default)
 bin/claude-history-export ~/.claude/projects/my-project
 
 # Export current directory's project
 bin/claude-history-export --current-project
+
+# Export with merged/deduplicated timeline (useful for forked chats)
+bin/claude-history-export ~/.claude/projects/my-project --multiple-chats=merge
 
 # Export to specific file
 bin/claude-history-export ~/.claude/projects/my-project --output custom.md
@@ -116,6 +122,18 @@ bin/claude-history-export ~/.claude/projects/my-project --output custom.md
 # Show help
 bin/claude-history-export --help
 ```
+
+### When to use merge mode
+
+Use `--multiple-chats=merge` when:
+- Your project has many forked chats with shared history
+- You want a single chronological timeline without duplication
+- You want to see the actual conversation flow across all branches
+
+Use the default separate mode when:
+- You want to see each chat independently
+- You need to understand the fork structure
+- You want per-chat metadata and clear boundaries
 
 ## Testing
 
